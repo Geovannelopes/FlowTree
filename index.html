@@ -10,18 +10,90 @@
 <body>
     <div class="board-shell">
         <header class="board-header">
-            <div>
+            <div class="header-left">
                 <p class="board-eyebrow">FlowTree</p>
                 <h1>Kanban</h1>
             </div>
 
-            <button type="button" class="create-column-btn">
-                <i class="fa-solid fa-plus"></i>
-                Nova coluna
-            </button>
+            <div class="header-search">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" placeholder="Buscar tarefas..." id="search-input" class="search-input">
+            </div>
+
+            <div class="header-actions">
+                <button type="button" class="create-column-btn">
+                    <i class="fa-solid fa-plus"></i>
+                    Nova coluna
+                </button>
+
+                <button type="button" class="header-menu-btn" id="menu-toggle">
+                    <i class="fa-solid fa-circle-user"></i>
+                </button>
+
+                <div class="header-menu" id="header-menu">
+                    <button class="menu-item" id="theme-toggle">
+                        <i class="fa-solid fa-moon"></i>
+                        <span>Modo escuro</span>
+                    </button>
+                    <button class="menu-item">
+                        <i class="fa-solid fa-gear"></i>
+                        <span>Configurações</span>
+                    </button>
+                    <hr class="menu-divider">
+                    <button class="menu-item">
+                        <i class="fa-solid fa-right-from-bracket"></i>
+                        <span>Sair</span>
+                    </button>
+                </div>
+            </div>
         </header>
 
         <main class="kanban" id="kanban-board"></main>
+    </div>
+
+    <!-- Modal para criar nova tarefa -->
+    <div class="modal-overlay" id="task-modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Nova Tarefa</h2>
+                <button type="button" class="modal-close" id="modal-close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="task-form" class="task-form">
+                <div class="form-group">
+                    <label for="task-title">Título *</label>
+                    <input type="text" id="task-title" placeholder="Digite o título da tarefa" required>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task-priority">Prioridade</label>
+                        <select id="task-priority">
+                            <option value="low">Baixa</option>
+                            <option value="medium" selected>Média</option>
+                            <option value="high">Alta</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="task-date">Data de Vencimento</label>
+                        <input type="date" id="task-date">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="task-attachment">Anexo (URL)</label>
+                    <input type="text" id="task-attachment" placeholder="Cole o link do anexo (opcional)">
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="modal-cancel">Cancelar</button>
+                    <button type="submit" class="btn-submit">Criar Tarefa</button>
+                </div>
+            </form>
+        </div>
     </div>
 
     <script src="src/javascript/script.js"></script>
