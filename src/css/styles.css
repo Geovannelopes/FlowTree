@@ -66,6 +66,8 @@ body {
     backdrop-filter: blur(20px);
     border: 1px solid var(--border-strong);
     box-shadow: 0 8px 32px var(--shadow);
+    position: relative;
+    z-index: 1200;
 }
 
 .header-left {
@@ -194,7 +196,7 @@ body {
     gap: 4px;
     backdrop-filter: blur(12px);
     box-shadow: 0 16px 40px rgba(13, 24, 19, 0.18);
-    z-index: 100;
+    z-index: 1300;
     animation: slideDown 0.3s ease;
 }
 
@@ -264,7 +266,8 @@ body {
     padding: 12px;
     overflow: hidden;
     position: relative;
-    min-width: 252px;
+    flex: 0 0 var(--column-width, 320px);
+    min-width: var(--column-width, 320px);
 }
 
 .kanban-column::after {
@@ -729,6 +732,18 @@ body.dark-mode .kanban-title h2 {
     color: #edf2ea;
 }
 
+/* Modals adicionados para sprints e métricas */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10,10,10,0.4);
+    z-index: 3000;
+    padding: 20px;
+}
+
 body.dark-mode .kanban-card {
     background-color: #223029;
     color: #edf2ea;
@@ -1047,4 +1062,28 @@ body.dark-mode .btn-cancel {
 body.dark-mode .btn-cancel:hover {
     background: #313f35;
     color: #ffffff;
+}
+
+/* Sprint badge */
+.sprint-badge {
+    margin-top:6px;
+    display:inline-block;
+    background: rgba(63,102,80,0.08);
+    color: var(--forest-dark);
+    padding:4px 8px;
+    border-radius:8px;
+    font-size:12px;
+    font-weight:600;
+}
+
+.kanban-card.in-active-sprint {
+    box-shadow: 0 12px 32px rgba(63,102,80,0.12);
+    border: 1px solid rgba(63,102,80,0.18);
+}
+
+#sprint-assigned-cards .sprint-card-item {
+    padding:8px 10px;
+    background: var(--surface-soft);
+    border-radius:8px;
+    border:1px solid var(--border);
 }

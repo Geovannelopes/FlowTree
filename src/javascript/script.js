@@ -21,6 +21,12 @@ const attachmentInputMap = new Map();
 const defaultBoard = {
     columns: [
         {
+            id: 'column-backlog',
+            title: 'Backlog',
+            accent: getNextAccent(0),
+            cards: []
+        },
+        {
             id: 'column-1',
             title: 'Pendente',
             accent: '#4e735b',
@@ -112,7 +118,11 @@ const defaultBoard = {
                 }
             ]
         }
-    ]
+    ],
+    sprints: [],
+    activeSprintId: null,
+    filterActiveSprint: false,
+    history: {}
 };
 
 let boardState = loadBoardState();
@@ -184,6 +194,24 @@ function getNextAccent(index) {
     return accentPalette[index % accentPalette.length];
 }
 
+// Ajusta a largura das colunas dinamicamente com base na largura da janela
+function updateColumnWidth() {
+    const columnsCount = Math.max(1, (boardState && boardState.columns) ? boardState.columns.length : 1);
+    const desiredVisible = Math.min(6, columnsCount); // tenta mostrar até 6 colunas confortavelmente
+    const horizontalPadding = 220; // espaço para cabeçalho e margens
+    const gapPerColumn = 14; // gap definido no .kanban
+    const totalGaps = (desiredVisible - 1) * gapPerColumn;
+
+    let available = window.innerWidth - horizontalPadding - totalGaps;
+    if (available < 600) available = window.innerWidth - 120; // fallback em telas pequenas
+
+    let width = Math.floor(available / desiredVisible);
+    // reduzir limites: evitar colunas muito grandes em monitores grandes
+    width = Math.max(260, Math.min(380, width)); // limites ajustados
+
+    document.documentElement.style.setProperty('--column-width', `${width}px`);
+}
+
 function normalizeBoardState(rawState) {
     if (!rawState) {
         return cloneBoardState(defaultBoard);
@@ -225,9 +253,13 @@ function normalizeBoardState(rawState) {
                     dueDate: cardState.dueDate || '',
                     comments: cardState.comments || 0,
                     attachments: normalizeAttachments(cardState.attachments),
-                    avatar: cardState.avatar || defaultBoard.columns[index % defaultBoard.columns.length].cards[0].avatar
+                    avatar: cardState.avatar || defaultBoard.columns[index % defaultBoard.columns.length].cards[0].avatar,
+                    sprintId: cardState.sprintId || null
                 }))
-            }))
+            })),
+            sprints: Array.isArray(rawState.sprints) ? rawState.sprints : [],
+            activeSprintId: rawState.activeSprintId || null,
+            history: rawState.history || {}
         };
     }
 
@@ -273,9 +305,12 @@ function renderPriorityLabel(priority) {
 
 function renderCard(card) {
     const attachmentCount = getAttachmentCount(card);
+    const sprint = (boardState.sprints || []).find(s => s.id === card.sprintId);
+    const sprintLabel = sprint ? `<div class="sprint-badge">${sprint.name}</div>` : '';
+    const activeClass = (card.sprintId && boardState.activeSprintId && card.sprintId === boardState.activeSprintId) ? ' in-active-sprint' : '';
 
     return `
-        <div class="kanban-card" draggable="true" data-card-id="${card.id}" data-priority="${card.priority}" data-due-date="${card.dueDate}">
+        <div class="kanban-card${activeClass}" draggable="true" data-card-id="${card.id}" data-priority="${card.priority}" data-due-date="${card.dueDate}" data-sprint-id="${card.sprintId || ''}">
             <div class="card-topbar">
                 <button type="button" class="badge ${card.priority}">
                     <span class="priority-text">${renderPriorityLabel(card.priority)}</span>
@@ -283,6 +318,9 @@ function renderCard(card) {
                 </button>
 
                 <div class="card-actions">
+                    <button type="button" class="sprint-toggle-btn" title="Atribuir/Remover à sprint ativa">
+                        <i class="fa-solid fa-flag"></i>
+                    </button>
                     <button type="button" class="edit-card-btn" aria-label="Editar tarefa">
                         <i class="fa-regular fa-pen-to-square"></i>
                     </button>
@@ -294,6 +332,8 @@ function renderCard(card) {
             </div>
 
             <p class="card-title">${card.title}</p>
+
+            ${sprintLabel}
 
             <div class="card-footer">
                 <button type="button" class="attachment-btn" aria-label="Adicionar anexo">
@@ -314,6 +354,7 @@ function renderCard(card) {
 }
 
 function renderBoard() {
+    updateColumnWidth();
     board.innerHTML = boardState.columns.map(column => `
         <section class="kanban-column" data-column-id="${column.id}" style="--column-accent: ${column.accent};">
             <div class="kanban-title">
@@ -325,7 +366,10 @@ function renderBoard() {
             </div>
 
             <div class="kanban-cards" data-column-id="${column.id}">
-                ${column.cards.map(renderCard).join('')}
+                ${column.cards.filter(card => {
+                    if (!boardState.filterActiveSprint) return true;
+                    return card.sprintId && boardState.activeSprintId && card.sprintId === boardState.activeSprintId;
+                }).map(renderCard).join('')}
             </div>
         </section>
     `).join('');
@@ -476,6 +520,8 @@ function getDragAfterElement(container, y) {
 }
 
 function updateBoardStateFromDom() {
+    const prevState = cloneBoardState(boardState);
+
     const updatedColumns = [...board.querySelectorAll('.kanban-cards')].map(columnElement => {
         const columnId = columnElement.dataset.columnId;
         const column = boardState.columns.find(item => item.id === columnId);
@@ -492,7 +538,8 @@ function updateBoardStateFromDom() {
                     .find(item => item.id === columnId)
                     ?.cards.find(item => item.id === cardElement.dataset.cardId)
                     ?.attachments || [],
-                avatar: ''
+                avatar: '',
+                sprintId: cardElement.dataset.sprintId || null
             }))
         };
     });
@@ -501,6 +548,35 @@ function updateBoardStateFromDom() {
         ...boardState,
         columns: updatedColumns
     };
+
+    recordMovements(prevState, boardState);
+}
+
+function recordMovements(prev, next) {
+    // For each card, detect column changes and record timestamped events
+    const now = Date.now();
+
+    prev.columns.forEach(prevCol => {
+        prevCol.cards.forEach(card => {
+            const prevColumnId = prevCol.id;
+            const newLocation = next.columns.find(c => c.cards.some(cc => cc.id === card.id));
+
+            if (!newLocation) return;
+
+            const newColumnId = newLocation.id;
+
+            if (prevColumnId !== newColumnId) {
+                if (!next.history) next.history = {};
+                if (!next.history[card.id]) next.history[card.id] = [];
+
+                next.history[card.id].push({
+                    from: prevColumnId,
+                    to: newColumnId,
+                    at: now
+                });
+            }
+        });
+    });
 }
 
 function handleAddColumn() {
@@ -570,6 +646,14 @@ function attachInteractions() {
             saveBoardState();
             renderBoard();
         });
+
+        const sprintToggle = card.querySelector('.sprint-toggle-btn');
+        if (sprintToggle) {
+            sprintToggle.addEventListener('click', e => {
+                e.stopPropagation();
+                toggleAssignCardToActiveSprint(card);
+            });
+        }
 
         card.querySelector('.edit-card-btn').addEventListener('click', e => {
             e.stopPropagation();
@@ -754,7 +838,8 @@ function createNewTask(data) {
                 dataUrl: ''
             }
         ] : [],
-        avatar: 'src/images/avatar2.png'
+        avatar: 'src/images/avatar2.png',
+        sprintId: boardState.activeSprintId || null
     };
 
     column.cards.push(newCard);
@@ -762,6 +847,272 @@ function createNewTask(data) {
     renderBoard();
     closeTaskModal();
 }
+
+function toggleAssignCardToActiveSprint(cardElement) {
+    if (!boardState.activeSprintId) {
+        alert('Nenhuma sprint ativa. Crie ou ative uma sprint primeiro.');
+        return;
+    }
+
+    const columnId = cardElement.closest('.kanban-cards')?.dataset.columnId;
+    if (!columnId) return;
+
+    const column = boardState.columns.find(c => c.id === columnId);
+    if (!column) return;
+
+    const cardState = column.cards.find(c => c.id === cardElement.dataset.cardId);
+    if (!cardState) return;
+
+    if (cardState.sprintId === boardState.activeSprintId) {
+        // remove
+        cardState.sprintId = null;
+        cardElement.dataset.sprintId = '';
+    } else {
+        cardState.sprintId = boardState.activeSprintId;
+        cardElement.dataset.sprintId = boardState.activeSprintId;
+    }
+
+    saveBoardState();
+    renderBoard();
+}
+
+// Sprint management
+const sprintModal = document.getElementById('sprint-modal-overlay');
+const sprintForm = document.getElementById('sprint-form');
+const sprintList = document.getElementById('sprint-list');
+
+function openSprintManager() {
+    renderSprintList();
+    sprintModal.classList.add('active');
+}
+
+function closeSprintManager() {
+    sprintModal.classList.remove('active');
+}
+
+function renderSprintList() {
+    sprintList.innerHTML = '';
+
+    if (!Array.isArray(boardState.sprints) || boardState.sprints.length === 0) {
+        sprintList.innerHTML = '<p>Nenhuma sprint criada.</p>';
+        return;
+    }
+
+    boardState.sprints.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'sprint-item';
+        div.innerHTML = `
+            <strong>${s.name}</strong>
+            <div style="font-size:12px;color:#666">${s.start || '-'} → ${s.end || '-'}</div>
+            <div style="margin-top:6px">
+                <button data-id="${s.id}" class="btn-activate">${boardState.activeSprintId === s.id ? 'Ativa' : 'Ativar'}</button>
+                <button data-id="${s.id}" class="btn-view-cards">Ver cards</button>
+                <button data-id="${s.id}" class="btn-close">Encerrar</button>
+            </div>
+        `;
+
+        sprintList.appendChild(div);
+    });
+
+    sprintList.querySelectorAll('.btn-activate').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            boardState.activeSprintId = id;
+            saveBoardState();
+            renderSprintList();
+            renderBoard();
+        });
+    });
+
+    sprintList.querySelectorAll('.btn-close').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            if (boardState.activeSprintId === id) boardState.activeSprintId = null;
+            boardState.sprints = boardState.sprints.filter(s => s.id !== id);
+            saveBoardState();
+            renderSprintList();
+            renderBoard();
+        });
+    });
+
+    sprintList.querySelectorAll('.btn-view-cards').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const id = btn.dataset.id;
+            renderAssignedCards(id);
+        });
+    });
+}
+
+function renderAssignedCards(sprintId) {
+    const container = document.getElementById('sprint-assigned-cards');
+    container.innerHTML = '';
+
+    const cards = [];
+    boardState.columns.forEach(col => {
+        col.cards.forEach(card => {
+            if (card.sprintId === sprintId) cards.push({ ...card, column: col.title });
+        });
+    });
+
+    if (cards.length === 0) {
+        container.innerHTML = '<p>Nenhum card atribuído a esta sprint.</p>';
+        return;
+    }
+
+    const list = document.createElement('div');
+    list.style.display = 'grid';
+    list.style.gap = '8px';
+
+    cards.forEach(c => {
+        const el = document.createElement('div');
+        el.className = 'sprint-card-item';
+        el.innerHTML = `<strong>${c.title}</strong> <div style="font-size:12px;color:#666">${c.column}</div>`;
+        list.appendChild(el);
+    });
+
+    container.appendChild(list);
+}
+
+function assignAllBacklogToActiveSprint() {
+    if (!boardState.activeSprintId) return alert('Ative uma sprint antes de atribuir.');
+
+    const backlog = boardState.columns.find(c => c.id === 'column-backlog' || c.title.toLowerCase().includes('backlog'));
+    if (!backlog) return alert('Não há coluna Backlog.');
+
+    backlog.cards.forEach(card => {
+        card.sprintId = boardState.activeSprintId;
+    });
+
+    saveBoardState();
+    renderBoard();
+    renderSprintList();
+    renderAssignedCards(boardState.activeSprintId);
+}
+
+function exportActiveSprintCSV() {
+    if (!boardState.activeSprintId) return alert('Ative uma sprint para exportar.');
+
+    const sprint = (boardState.sprints || []).find(s => s.id === boardState.activeSprintId);
+    const rows = [];
+    rows.push(['Sprint', sprint ? sprint.name : '']);
+    rows.push(['Card ID', 'Título', 'Coluna', 'Prioridade', 'Vencimento']);
+
+    boardState.columns.forEach(col => {
+        col.cards.forEach(card => {
+            if (card.sprintId === boardState.activeSprintId) {
+                rows.push([card.id, card.title, col.title, card.priority, card.dueDate || '']);
+            }
+        });
+    });
+
+    const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${sprint ? sprint.name.replace(/\s+/g,'_') : 'sprint'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+}
+
+sprintForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+
+    const name = document.getElementById('sprint-name').value.trim();
+    const start = document.getElementById('sprint-start').value;
+    const end = document.getElementById('sprint-end').value;
+
+    if (!name) return alert('Nome obrigatório');
+
+    const id = 'sprint-' + Date.now();
+
+    boardState.sprints = boardState.sprints || [];
+    boardState.sprints.push({ id, name, start, end });
+    boardState.activeSprintId = id;
+    saveBoardState();
+    renderSprintList();
+    renderBoard();
+});
+
+document.getElementById('sprint-modal-close').addEventListener('click', closeSprintManager);
+document.getElementById('sprint-modal-cancel').addEventListener('click', closeSprintManager);
+document.getElementById('sprint-manager-btn').addEventListener('click', (e) => { e.stopPropagation(); openSprintManager(); });
+// filtro de sprint ativa pelo menu
+const filterSprintToggle = document.getElementById('filter-sprint-toggle');
+if (filterSprintToggle) {
+    filterSprintToggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        boardState.filterActiveSprint = !boardState.filterActiveSprint;
+        saveBoardState();
+        renderBoard();
+        // opcional: alterar estilo do botão
+        filterSprintToggle.classList.toggle('active', boardState.filterActiveSprint);
+    });
+}
+
+const assignBacklogBtn = document.getElementById('assign-backlog-btn');
+if (assignBacklogBtn) assignBacklogBtn.addEventListener('click', (e) => { e.preventDefault(); assignAllBacklogToActiveSprint(); });
+
+const exportCsvBtn = document.getElementById('export-sprint-csv-btn');
+if (exportCsvBtn) exportCsvBtn.addEventListener('click', (e) => { e.preventDefault(); exportActiveSprintCSV(); });
+
+// Metrics
+const metricsModal = document.getElementById('metrics-modal-overlay');
+const metricsContent = document.getElementById('metrics-content');
+
+function openMetrics() {
+    renderMetrics();
+    metricsModal.classList.add('active');
+}
+
+function closeMetrics() {
+    metricsModal.classList.remove('active');
+}
+
+function renderMetrics() {
+    const metrics = computeMetrics();
+    metricsContent.innerHTML = `
+        <div><strong>Throughput (concluídos)</strong>: ${metrics.throughput}</div>
+        <div><strong>Tempo médio de ciclo</strong>: ${metrics.avgCycleTimeDays.toFixed(1)} dias</div>
+    `;
+}
+
+function computeMetrics() {
+    // throughput: número de movimentos para coluna 'Concluído'
+    let completed = 0;
+    const cycleTimes = [];
+
+    const doneColumn = boardState.columns.find(c => c.title && c.title.toLowerCase().includes('conclu')); 
+
+    Object.keys(boardState.history || {}).forEach(cardId => {
+        const events = boardState.history[cardId];
+        for (let i = 0; i < events.length; i++) {
+            const ev = events[i];
+            if (doneColumn && ev.to === doneColumn.id) {
+                completed += 1;
+
+                // try find when it left 'Pendente' or when created
+                const startEv = events.find(e => e.from && e.from !== ev.to) || events[0];
+                const startAt = startEv ? startEv.at : ev.at;
+                const cycleMs = ev.at - startAt;
+                cycleTimes.push(cycleMs / (1000 * 60 * 60 * 24));
+            }
+        }
+    });
+
+    const avg = cycleTimes.length ? (cycleTimes.reduce((a,b)=>a+b,0) / cycleTimes.length) : 0;
+
+    return {
+        throughput: completed,
+        avgCycleTimeDays: avg
+    };
+}
+
+document.getElementById('metrics-modal-close').addEventListener('click', closeMetrics);
+document.getElementById('metrics-btn').addEventListener('click', (e) => { e.stopPropagation(); openMetrics(); });
+
 
 // Event listeners do modal
 modalClose.addEventListener('click', closeTaskModal);
@@ -797,3 +1148,9 @@ taskForm.addEventListener('submit', (e) => {
 // Evento para o botão "+" em cada coluna
 
 renderBoard();
+
+// Atualiza largura ao redimensionar janela
+window.addEventListener('resize', () => {
+    updateColumnWidth();
+    // não precisa re-renderizar todo o board apenas pela largura
+});

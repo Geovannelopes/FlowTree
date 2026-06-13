@@ -35,6 +35,18 @@
                         <i class="fa-solid fa-moon"></i>
                         <span>Modo escuro</span>
                     </button>
+                    <button class="menu-item" id="sprint-manager-btn">
+                        <i class="fa-solid fa-flag"></i>
+                        <span>Sprints</span>
+                    </button>
+                    <button class="menu-item" id="metrics-btn">
+                        <i class="fa-solid fa-chart-line"></i>
+                        <span>Métricas</span>
+                    </button>
+                    <button class="menu-item" id="filter-sprint-toggle">
+                        <i class="fa-solid fa-filter"></i>
+                        <span>Mostrar sprint ativa</span>
+                    </button>
                     <button class="menu-item">
                         <i class="fa-solid fa-gear"></i>
                         <span>Configurações</span>
@@ -93,6 +105,68 @@
                     <button type="submit" class="btn-submit">Criar Tarefa</button>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Modal para gerenciar sprints -->
+    <div class="modal-overlay" id="sprint-modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Gerenciar Sprints</h2>
+                <button type="button" class="modal-close" id="sprint-modal-close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <form id="sprint-form" class="task-form">
+                <div class="form-group">
+                    <label for="sprint-name">Nome da sprint *</label>
+                    <input type="text" id="sprint-name" placeholder="Ex: Sprint 1" required>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="sprint-start">Início</label>
+                        <input type="date" id="sprint-start">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="sprint-end">Término</label>
+                        <input type="date" id="sprint-end">
+                    </div>
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" id="sprint-modal-cancel">Cancelar</button>
+                    <button type="submit" class="btn-submit">Criar Sprint</button>
+                </div>
+            </form>
+
+            <hr>
+            <div style="display:flex;gap:12px;align-items:center;margin-top:8px">
+                <button type="button" class="btn-submit" id="assign-backlog-btn">Atribuir tudo do Backlog</button>
+                <button type="button" class="btn-submit" id="export-sprint-csv-btn">Exportar CSV</button>
+            </div>
+
+            <hr>
+            <div id="sprint-list"></div>
+            <div id="sprint-assigned-cards" style="margin-top:12px"></div>
+        </div>
+    </div>
+
+    <!-- Modal de métricas -->
+    <div class="modal-overlay" id="metrics-modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Métricas</h2>
+                <button type="button" class="modal-close" id="metrics-modal-close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div id="metrics-content" style="padding:16px">
+                <!-- preenchido pelo JS -->
+            </div>
         </div>
     </div>
 
