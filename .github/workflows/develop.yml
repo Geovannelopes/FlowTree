@@ -1,0 +1,48 @@
+name: "Deploy Develop"
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixando o codigo...
+        uses: actions/checkout@v5
+
+      - name: Instalando rsync...
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Configurando chave SSH...
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEVELOP_DEPLOY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.DEVELOP_PORT }} ${{ secrets.DEVELOP_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Enviando arquivos com rsync...
+        run: |
+          rsync -avz --delete \
+            -e "ssh -p ${{ secrets.DEVELOP_PORT }}" \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='api/.env' \
+            --exclude='app/.env' \
+            --exclude='vendor/' \
+            --exclude='node_modules/' \
+            --exclude='api/storage/app/' \
+            ./ ${{ secrets.DEVELOP_USER }}@${{ secrets.DEVELOP_HOST }}:${{ secrets.DEVELOP_PATH }}
+
+      - name: Executando deploy...
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEVELOP_HOST }}
+          username: ${{ secrets.DEVELOP_USER }}
+          key: ${{ secrets.DEVELOP_DEPLOY }}
+          port: ${{ secrets.DEVELOP_PORT }}
+          script: |
+            cd ${{ secrets.DEVELOP_PATH }}
+            ./deploy.sh

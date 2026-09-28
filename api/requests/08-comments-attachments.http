@@ -1,0 +1,60 @@
+# FlowTree — Comentários e anexos dos cards — módulo `tasks`
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@cardUuid = COLE_O_UUID_DO_CARD
+@commentUuid = COLE_O_UUID_DO_COMENTARIO
+@attachmentUuid = COLE_O_UUID_DO_ANEXO
+
+### Listar comentários (mais recentes primeiro)
+GET {{host}}/cards/{{cardUuid}}/comments
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Comentar (notifica responsável e criador do card)
+POST {{host}}/cards/{{cardUuid}}/comments
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "body": "Priorizar para esta sprint."
+}
+
+### Editar comentário (só autor ou admin)
+PUT {{host}}/comments/{{commentUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "body": "Priorizar para esta sprint — combinado com o cliente."
+}
+
+### Excluir comentário (só autor ou admin)
+DELETE {{host}}/comments/{{commentUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Listar anexos do card
+GET {{host}}/cards/{{cardUuid}}/attachments
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Enviar anexo (qualquer arquivo até 20 MB)
+POST {{host}}/cards/{{cardUuid}}/attachments
+Accept: application/json
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----FlowTreeBoundary
+
+------FlowTreeBoundary
+Content-Disposition: form-data; name="file"; filename="briefing.pdf"
+Content-Type: application/pdf
+
+< ./briefing.pdf
+------FlowTreeBoundary--
+
+### Excluir anexo
+DELETE {{host}}/attachments/{{attachmentUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}

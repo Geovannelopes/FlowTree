@@ -1,0 +1,158 @@
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+/* Dark mode dirigido por atributo no <html> (data-theme="dark"). */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+  Tokens semânticos da identidade FlowTree (verde floresta). Os valores no
+  @theme são o tema CLARO; o bloco [data-theme="dark"] troca as MESMAS variáveis.
+  Como as utilitárias do Tailwind v4 referenciam var(--color-*), trocar a
+  variável vira o tema inteiro — sem `dark:` por elemento.
+*/
+@theme {
+  --font-sans: 'Manrope', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  /* Marca (verde floresta) */
+  --color-brand-50: #eef3ee;
+  --color-brand-100: #d9e5da;
+  --color-brand-200: #b6cdb9;
+  --color-brand-300: #8eae94;
+  --color-brand-400: #4e735b;
+  --color-brand-500: #3f6650;
+  --color-brand-600: #2f4a3a;
+  --color-brand-700: #263c2f;
+  --color-brand-800: #1c2c23;
+  --color-brand-900: #132018;
+
+  /* Tons da paleta FlowTree */
+  --color-moss: #6f8a63;
+  --color-bark: #7d644a;
+  --color-water: #4c7570;
+  --color-amber: #8e744e;
+  --color-sage: #95a58f;
+
+  /* Neutros semânticos — tema claro */
+  --color-canvas: #eef2ea;
+  --color-surface: #f6f3ec;
+  --color-surface-2: #e3e8de;
+  --color-border: #d6ddd3;
+  --color-content: #1f2a24;
+  --color-muted: #5f6f66;
+  --color-subtle: #8c9a92;
+}
+
+[data-theme="dark"] {
+  --color-canvas: #141a16;
+  --color-surface: #1f2822;
+  --color-surface-2: #1a221d;
+  --color-border: #2d382f;
+  --color-content: #e8ede6;
+  --color-muted: #a3b0a7;
+  --color-subtle: #6f7d74;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-canvas text-content antialiased;
+  font-family: var(--font-sans);
+  background-image:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.5), transparent 36%),
+    radial-gradient(circle at right bottom, rgba(141, 166, 150, 0.16), transparent 32%);
+  background-attachment: fixed;
+}
+
+[data-theme="dark"] body {
+  background-image:
+    radial-gradient(circle at top left, rgba(79, 115, 91, 0.14), transparent 36%),
+    radial-gradient(circle at right bottom, rgba(76, 117, 112, 0.12), transparent 32%);
+}
+
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  summary,
+  label[for] {
+    cursor: pointer;
+  }
+
+  button:disabled {
+    cursor: not-allowed;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-400);
+    outline-offset: 2px;
+  }
+}
+
+/* Scrollbar fina na cor do tema. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-subtle) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-subtle);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-muted);
+}
+
+/* Utilitários de formulário reutilizados nas telas. */
+@utility input {
+  @apply w-full rounded-xl border border-border bg-surface px-3 py-2 text-sm text-content placeholder:text-subtle focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-400/30;
+}
+@utility btn {
+  @apply inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold transition disabled:opacity-60;
+}
+@utility btn-primary {
+  @apply btn bg-brand-500 text-white shadow-sm hover:bg-brand-600;
+}
+@utility btn-secondary {
+  @apply btn border border-border bg-surface text-muted hover:bg-surface-2 hover:text-content;
+}
+@utility btn-danger {
+  @apply btn bg-red-700 text-white hover:bg-red-800;
+}
+@utility btn-ghost {
+  @apply btn text-muted hover:bg-surface-2 hover:text-content;
+}
+@utility panel {
+  @apply rounded-2xl border border-border bg-surface shadow-sm;
+}
+@utility label {
+  @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-muted;
+}
+@utility badge {
+  @apply inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide;
+}
+
+/* Pan do quadro (arrastar o fundo). */
+.board-pan {
+  cursor: grab;
+}
+.board-pan.is-panning {
+  cursor: grabbing;
+  user-select: none;
+}
+
+.sortable-ghost {
+  opacity: 0.4;
+}

@@ -1,0 +1,2861 @@
+openapi: 3.0.3
+info:
+  title: FlowTree API
+  version: 1.0.0
+  description: |
+    API REST do **FlowTree** — Kanban com sprints, métricas e tempo real (Laravel Reverb).
+
+    - Autenticação por **JWT Bearer** (`Authorization: Bearer <token>`), TTL de 60 min e refresh de 14 dias.
+    - Recursos e coleções vêm no envelope `{ "data": ... }`. Exceções: `POST /login` e `POST /refresh`
+      devolvem `{ token, token_type, expires_in, user }`; listas paginadas devolvem `{ data, links, meta }`.
+    - Objetos são referenciados pelo `uuid` público; o `id` numérico é interno.
+    - Acesso por **módulos**: `tasks` (projetos/board), `users` (gestão de usuários) e `settings`
+      (flags/prioridades). Usuários `is_admin` passam em tudo.
+    - Tempo real: canais privados `project.{projectUuid}` (também presence) e `notifications.{userUuid}`,
+      autorizados em `POST /broadcasting/auth`. Eventos: `card.changed`, `column.changed`, `sprint.changed`,
+      `comment.changed`, `attachment.changed` e `notification.created`.
+
+servers:
+  - url: http://localhost:5100/api
+    description: API direto (container flowtree-api)
+  - url: http://localhost:5600/api
+    description: Via front (nginx do flowtree-app, mesma origem)
+
+tags:
+  - name: Auth
+    description: Login, refresh, logout e recuperação de senha
+  - name: Perfil
+    description: Dados do próprio usuário autenticado
+  - name: Usuários
+    description: Gestão de usuários (módulo `users`)
+  - name: Módulos
+    description: Módulos de acesso do sistema
+  - name: Configurações
+    description: Flags e prioridades (módulo `settings`; leitura no módulo `tasks`)
+  - name: Manutenção
+    description: Reset do banco de dados (módulo `settings` e usuário `is_admin`)
+  - name: Projetos
+    description: Projetos (boards) do Kanban (módulo `tasks`)
+  - name: Colunas
+    description: Colunas do board (módulo `tasks`)
+  - name: Sprints
+    description: Sprints do projeto (módulo `tasks`)
+  - name: Cards
+    description: Cards do board (módulo `tasks`)
+  - name: Comentários
+    description: Comentários dos cards (módulo `tasks`)
+  - name: Anexos
+    description: Anexos dos cards (módulo `tasks`)
+  - name: Notificações
+    description: Notificações do usuário autenticado
+  - name: Métricas
+    description: Métricas do projeto (throughput, ciclo, lead time)
+  - name: Broadcasting
+    description: Autorização de canais privados/presence do Reverb
+
+security:
+  - bearerAuth: []
+
+paths:
+  # ---------------------------------------------------------------- Auth
+  /login:
+    post:
+      tags: [Auth]
+      summary: Login
+      description: Autentica por e-mail e senha e devolve o JWT. Limite de 6 tentativas por minuto por IP.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@flowtree.test
+                password:
+                  type: string
+                  format: password
+                  example: password
+      responses:
+        '200':
+          description: Autenticado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '422':
+          description: Credenciais incorretas ou usuário inativo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /refresh:
+    post:
+      tags: [Auth]
+      summary: Renovar o token
+      description: |
+        Invalida o token atual (blacklist) e emite um novo. Aceita token já expirado, desde que dentro
+        da janela de refresh (14 dias). Envie o token antigo no header `Authorization`.
+      responses:
+        '200':
+          description: Novo token emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Não foi possível renovar a sessão
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  /forgot-password:
+    post:
+      tags: [Auth]
+      summary: Solicitar redefinição de senha
+      description: Envia o link de redefinição por e-mail. A resposta é sempre genérica (não revela se o e-mail existe).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+                  example: admin@flowtree.test
+      responses:
+        '200':
+          description: Mensagem genérica
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /reset-password:
+    post:
+      tags: [Auth]
+      summary: Redefinir a senha
+      description: Redefine a senha a partir do token recebido por e-mail.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, email, password, password_confirmation]
+              properties:
+                token:
+                  type: string
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                password_confirmation:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Senha redefinida
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /logout:
+    post:
+      tags: [Auth]
+      summary: Logout
+      description: Invalida (blacklist) o token atual.
+      responses:
+        '204':
+          description: Sessão encerrada
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /broadcasting/auth:
+    post:
+      tags: [Broadcasting]
+      summary: Autorizar canal do Reverb
+      description: |
+        Autoriza a assinatura de um canal privado ou presence usando o JWT (sem sessão).
+        Canais: `private-project.{projectUuid}`, `presence-project.{projectUuid}` (módulo `tasks`)
+        e `private-notifications.{userUuid}` (somente o próprio usuário).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [socket_id, channel_name]
+              properties:
+                socket_id:
+                  type: string
+                  example: 123456.789012
+                channel_name:
+                  type: string
+                  example: private-project.7b0c6a5e-2a4b-4c7d-9c1e-1f2a3b4c5d6e
+      responses:
+        '200':
+          description: Assinatura autorizada (payload no formato Pusher)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth:
+                    type: string
+                  channel_data:
+                    type: string
+                    description: Presente apenas em canais presence
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------- Perfil
+  /me:
+    get:
+      tags: [Perfil]
+      summary: Usuário autenticado
+      description: Devolve o usuário do token, com os módulos de acesso.
+      responses:
+        '200':
+          description: Usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    put:
+      tags: [Perfil]
+      summary: Atualizar dados do perfil
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: Administrador
+                position:
+                  type: string
+                  nullable: true
+                  maxLength: 255
+                  example: Gestor de projetos
+      responses:
+        '200':
+          description: Perfil atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /me/password:
+    put:
+      tags: [Perfil]
+      summary: Alterar a própria senha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, password, password_confirmation]
+              properties:
+                current_password:
+                  type: string
+                  format: password
+                password:
+                  type: string
+                  format: password
+                  minLength: 8
+                password_confirmation:
+                  type: string
+                  format: password
+      responses:
+        '200':
+          description: Senha alterada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /me/avatar:
+    post:
+      tags: [Perfil]
+      summary: Enviar/trocar a foto de perfil
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [avatar]
+              properties:
+                avatar:
+                  type: string
+                  format: binary
+                  description: Imagem jpg, jpeg, png ou webp (máx. 5 MB)
+      responses:
+        '200':
+          description: Avatar atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Perfil]
+      summary: Remover a foto de perfil
+      responses:
+        '200':
+          description: Avatar removido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------------- Módulos
+  /modules:
+    get:
+      tags: [Módulos]
+      summary: Listar módulos
+      responses:
+        '200':
+          description: Módulos do sistema
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Module'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ---------------------------------------------------------------- Notificações
+  /notifications:
+    get:
+      tags: [Notificações]
+      summary: Listar notificações
+      description: Notificações do usuário autenticado, mais recentes primeiro (paginado).
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Página de notificações
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/unread-count:
+    get:
+      tags: [Notificações]
+      summary: Quantidade de não lidas
+      responses:
+        '200':
+          description: Contagem
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count:
+                    type: integer
+                    example: 3
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/read-all:
+    post:
+      tags: [Notificações]
+      summary: Marcar todas como lidas
+      responses:
+        '204':
+          description: Marcadas
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /notifications/{id}/read:
+    post:
+      tags: [Notificações]
+      summary: Marcar uma notificação como lida
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      responses:
+        '200':
+          description: Notificação atualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Notification'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /notifications/{id}:
+    delete:
+      tags: [Notificações]
+      summary: Excluir uma notificação
+      parameters:
+        - $ref: '#/components/parameters/NotificationId'
+      responses:
+        '204':
+          description: Excluída
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------- Usuários (módulo users)
+  /users:
+    get:
+      tags: [Usuários]
+      summary: Listar usuários
+      description: Módulo `users`. Busca por nome ou e-mail; paginado.
+      parameters:
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Trecho do nome ou e-mail
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Página de usuários (com módulos)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Usuários]
+      summary: Criar usuário
+      description: Módulo `users`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateInput'
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /users/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Usuários]
+      summary: Detalhar usuário
+      responses:
+        '200':
+          description: Usuário
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Usuários]
+      summary: Atualizar usuário
+      description: Todos os campos são opcionais; `password` só é trocada se enviada.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateInput'
+      responses:
+        '200':
+          description: Usuário atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Usuários]
+      summary: Excluir usuário
+      description: Não é possível excluir o próprio usuário (422).
+      responses:
+        '204':
+          description: Excluído
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Tentativa de excluir a si mesmo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  /users/{uuid}/modules:
+    put:
+      tags: [Usuários]
+      summary: Sincronizar módulos do usuário
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [module_slugs]
+              properties:
+                module_slugs:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/ModuleSlug'
+                  example: [tasks, settings]
+      responses:
+        '200':
+          description: Usuário com os módulos atualizados
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  # ---------------------------------------------------------------- Configurações
+  /flags:
+    get:
+      tags: [Configurações]
+      summary: Listar flags
+      description: Módulo `tasks`.
+      responses:
+        '200':
+          description: Flags
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Flag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Configurações]
+      summary: Criar flag
+      description: Módulo `settings`. O `slug` é gerado a partir do nome.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, color]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: Bug
+                color:
+                  $ref: '#/components/schemas/HexColor'
+      responses:
+        '201':
+          description: Flag criada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Flag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /flags/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    put:
+      tags: [Configurações]
+      summary: Atualizar flag
+      description: Módulo `settings`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                color:
+                  $ref: '#/components/schemas/HexColor'
+      responses:
+        '200':
+          description: Flag atualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Flag'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Configurações]
+      summary: Excluir flag
+      description: Módulo `settings`.
+      responses:
+        '204':
+          description: Excluída
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /priorities:
+    get:
+      tags: [Configurações]
+      summary: Listar prioridades
+      description: Módulo `tasks`. Quatro níveis fixos (`low`, `medium`, `high`, `urgent`) com rótulo e cor editáveis.
+      responses:
+        '200':
+          description: Prioridades ordenadas por posição
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Priority'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /priorities/{uuid}:
+    put:
+      tags: [Configurações]
+      summary: Atualizar rótulo/cor de uma prioridade
+      description: Módulo `settings`. Os slugs são fixos; não há criação nem exclusão.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: Alta
+                color:
+                  $ref: '#/components/schemas/HexColor'
+      responses:
+        '200':
+          description: Prioridade atualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Priority'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /maintenance/reset:
+    post:
+      tags: [Manutenção]
+      summary: Resetar o banco de dados
+      description: |
+        Somente administradores (`is_admin`).
+        Apaga projetos (colunas, sprints, cards, movimentos, comentários, anexos), flags,
+        notificações e todos os usuários **exceto o administrador que executou**; os arquivos
+        enviados são removidos do disco (menos o avatar desse admin). Módulos e prioridades
+        voltam aos valores padrão.
+
+        - `demo`: recria os dados de demonstração (equipe `@flowtree.test`, flags e 5 projetos).
+        - `clean`: deixa apenas o administrador.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: string
+                  enum: [demo, clean]
+                  example: demo
+      responses:
+        '200':
+          description: Reset concluído
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      mode:
+                        type: string
+                        enum: [demo, clean]
+                      summary:
+                        type: object
+                        description: Totais após o reset
+                        properties:
+                          users:
+                            type: integer
+                            example: 9
+                          projects:
+                            type: integer
+                            example: 5
+                          cards:
+                            type: integer
+                            example: 95
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /assignable-users:
+    get:
+      tags: [Usuários]
+      summary: Usuários atribuíveis a cards
+      description: Módulo `tasks`. Lista enxuta dos usuários ativos, para o seletor de responsável.
+      responses:
+        '200':
+          description: Usuários ativos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  # ---------------------------------------------------------------- Projetos
+  /projects:
+    get:
+      tags: [Projetos]
+      summary: Listar projetos
+      description: Traz `owner`, `cards_count` e `active_sprint`. Por padrão lista só os não arquivados.
+      parameters:
+        - name: archived
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [0, 1]
+            default: 0
+          description: 1 = somente arquivados
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Trecho do nome
+      responses:
+        '200':
+          description: Projetos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags: [Projetos]
+      summary: Criar projeto
+      description: |
+        Cria o projeto com as colunas padrão do FlowTree (Backlog, Pendente, Em front-end, Em back-end,
+        Em teste, Concluído) e registra o criador como `owner`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: FlowTree Demo
+                description:
+                  type: string
+                  nullable: true
+                  example: Board de exemplo do Kanban.
+                color:
+                  $ref: '#/components/schemas/HexColor'
+                member_uuids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '201':
+          description: Projeto criado (com colunas)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /projects/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Projetos]
+      summary: Detalhar projeto
+      description: Traz `owner`, `members`, `columns`, `sprints` e `cards_count`.
+      responses:
+        '200':
+          description: Projeto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Projetos]
+      summary: Atualizar projeto
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                description:
+                  type: string
+                  nullable: true
+                color:
+                  $ref: '#/components/schemas/HexColor'
+                is_archived:
+                  type: boolean
+                member_uuids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Projeto atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Projetos]
+      summary: Excluir projeto
+      responses:
+        '204':
+          description: Excluído
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{uuid}/logo:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    post:
+      tags: [Projetos]
+      summary: Enviar/trocar o logo do projeto
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [logo]
+              properties:
+                logo:
+                  type: string
+                  format: binary
+                  description: Imagem jpg, jpeg, png, webp ou svg (máx. 5 MB)
+      responses:
+        '200':
+          description: Projeto com o novo logo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Projetos]
+      summary: Remover o logo do projeto
+      responses:
+        '200':
+          description: Projeto sem logo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{uuid}/board:
+    get:
+      tags: [Projetos]
+      summary: Board do projeto
+      description: |
+        Projeto com `columns[].cards[]` já ordenados por posição, filtrados pelo recorte de sprint.
+        A resposta traz também o eco do recorte (`sprint`) e a lista de sprints do projeto.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+        - $ref: '#/components/parameters/SprintScope'
+      responses:
+        '200':
+          description: Board
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Project'
+                  sprint:
+                    type: string
+                    description: '`all`, `backlog` ou o uuid da sprint aplicada'
+                    example: all
+                  sprints:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sprint'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /projects/{uuid}/metrics:
+    get:
+      tags: [Métricas]
+      summary: Métricas do projeto
+      description: |
+        Throughput (cards concluídos no escopo), tempo médio de ciclo (`completed_at - started_at`),
+        lead time médio (`completed_at - created_at`), distribuição por coluna/prioridade/responsável
+        e concluídos por dia nos últimos 30 dias.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+        - $ref: '#/components/parameters/SprintScope'
+      responses:
+        '200':
+          description: Métricas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Metrics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------- Colunas
+  /projects/{uuid}/columns:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Colunas]
+      summary: Listar colunas do projeto
+      responses:
+        '200':
+          description: Colunas ordenadas por posição (com `cards_count`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BoardColumn'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Colunas]
+      summary: Criar coluna
+      description: A coluna entra no fim do board.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                  example: Em revisão
+                color:
+                  $ref: '#/components/schemas/HexColor'
+                wip_limit:
+                  type: integer
+                  nullable: true
+                  minimum: 1
+                  example: 5
+                is_done:
+                  type: boolean
+                  default: false
+                  description: Coluna que conta como "Concluído" (preenche `completed_at` dos cards)
+      responses:
+        '201':
+          description: Coluna criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoardColumnData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /projects/{uuid}/columns/reorder:
+    patch:
+      tags: [Colunas]
+      summary: Reordenar colunas
+      description: Renumera as posições (0..n) na ordem enviada; colunas fora da lista vão para o fim.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [column_uuids]
+              properties:
+                column_uuids:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Colunas na nova ordem
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BoardColumn'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /columns/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    put:
+      tags: [Colunas]
+      summary: Atualizar coluna
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 255
+                color:
+                  $ref: '#/components/schemas/HexColor'
+                wip_limit:
+                  type: integer
+                  nullable: true
+                  minimum: 1
+                is_done:
+                  type: boolean
+      responses:
+        '200':
+          description: Coluna atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoardColumnData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Colunas]
+      summary: Excluir coluna
+      description: Exclui os cards da coluna junto. Não é possível excluir a última coluna do projeto (422).
+      responses:
+        '204':
+          description: Excluída
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Última coluna do projeto
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  # ---------------------------------------------------------------- Sprints
+  /projects/{uuid}/sprints:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Sprints]
+      summary: Listar sprints do projeto
+      responses:
+        '200':
+          description: Sprints ordenadas por posição (com `cards_count` e `done_count`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sprint'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Sprints]
+      summary: Criar sprint
+      description: Nasce com status `planned`, no fim da ordem.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SprintInput'
+      responses:
+        '201':
+          description: Sprint criada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SprintData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /projects/{uuid}/sprints/reorder:
+    patch:
+      tags: [Sprints]
+      summary: Reordenar sprints
+      description: Renumera as posições na ordem enviada; sprints fora da lista vão para o fim.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sprint_uuids]
+              properties:
+                sprint_uuids:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: string
+                    format: uuid
+      responses:
+        '200':
+          description: Sprints na nova ordem
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Sprint'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /sprints/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    put:
+      tags: [Sprints]
+      summary: Atualizar sprint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SprintInput'
+      responses:
+        '200':
+          description: Sprint atualizada
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SprintData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Sprints]
+      summary: Excluir sprint
+      description: Os cards da sprint voltam ao Backlog.
+      responses:
+        '204':
+          description: Excluída
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sprints/{uuid}/activate:
+    post:
+      tags: [Sprints]
+      summary: Ativar sprint
+      description: Só existe uma sprint ativa por projeto — as demais ativas voltam para `planned`.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      responses:
+        '200':
+          description: Sprint ativa
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SprintData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sprints/{uuid}/complete:
+    post:
+      tags: [Sprints]
+      summary: Concluir sprint
+      description: |
+        Marca a sprint como `completed` (com `completed_at`). Os cards **não concluídos** (em coluna sem
+        `is_done`) vão para o destino informado em `move_open_to`: `null` = permanecem na sprint,
+        `backlog` = voltam ao Backlog, ou o uuid de outra sprint do projeto.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                move_open_to:
+                  type: string
+                  nullable: true
+                  description: '`null`, `backlog` ou uuid de outra sprint'
+                  example: backlog
+      responses:
+        '200':
+          description: Sprint concluída
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SprintData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /sprints/{uuid}/reopen:
+    post:
+      tags: [Sprints]
+      summary: Reabrir sprint
+      description: Sprint concluída volta para `planned`.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      responses:
+        '200':
+          description: Sprint reaberta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SprintData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sprints/{uuid}/assign-backlog:
+    post:
+      tags: [Sprints]
+      summary: Atribuir todo o Backlog à sprint
+      description: Todos os cards do projeto sem sprint passam para esta sprint.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      responses:
+        '200':
+          description: Sprint e quantidade de cards atribuídos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Sprint'
+                  assigned:
+                    type: integer
+                    description: Quantidade de cards movidos do Backlog
+                    example: 4
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sprints/{uuid}/export:
+    get:
+      tags: [Sprints]
+      summary: Exportar cards da sprint em CSV
+      description: 'Download `sprint-{slug}.csv` com as colunas: uuid, titulo, coluna, prioridade, responsavel, prazo, concluido_em.'
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      responses:
+        '200':
+          description: Arquivo CSV
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+                example: attachment; filename="sprint-sprint-1.csv"
+          content:
+            text/csv:
+              schema:
+                type: string
+                example: |
+                  uuid,titulo,coluna,prioridade,responsavel,prazo,concluido_em
+                  7b0c6a5e-...,Configurar CI,Concluído,high,Administrador,2026-09-10,2026-09-08 14:22:00
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------- Cards
+  /projects/{uuid}/cards:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Cards]
+      summary: Listar cards do projeto
+      parameters:
+        - name: column
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Uuid da coluna
+        - $ref: '#/components/parameters/SprintScope'
+        - name: assignee
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Uuid do responsável
+        - name: priority
+          in: query
+          required: false
+          schema:
+            $ref: '#/components/schemas/PrioritySlug'
+        - name: flag
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+          description: Uuid da flag
+        - name: search
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Trecho do título ou descrição
+      responses:
+        '200':
+          description: Cards ordenados por posição
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Card'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Cards]
+      summary: Criar card
+      description: |
+        Entra no fim da célula (coluna × sprint). Respeita o `wip_limit` da coluna. Criar direto em
+        coluna `is_done` já preenche `completed_at`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardCreateInput'
+      responses:
+        '201':
+          description: Card criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /cards/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Cards]
+      summary: Detalhar card
+      description: Traz `creator`, `comments`, `attachments` e `movements` (histórico de colunas).
+      responses:
+        '200':
+          description: Card completo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Cards]
+      summary: Atualizar card
+      description: |
+        Todos os campos são opcionais. `sprint_uuid: null` manda o card para o Backlog;
+        `assignee_uuid: null` remove o responsável. Trocar `board_column_uuid` registra movimento.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CardUpdateInput'
+      responses:
+        '200':
+          description: Card atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Cards]
+      summary: Excluir card
+      responses:
+        '204':
+          description: Excluído
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /cards/{uuid}/move:
+    patch:
+      tags: [Cards]
+      summary: Mover card (coluna, sprint e posição)
+      description: |
+        Posições são por célula (coluna × sprint). A origem fecha o vão e o destino abre espaço.
+        Se `sprint_uuid` não for enviado, a sprint atual é mantida; `null` = Backlog.
+        Se a coluna de destino tiver `wip_limit` cheio, responde 422 em `errors.board_column_uuid`.
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [board_column_uuid, position]
+              properties:
+                board_column_uuid:
+                  type: string
+                  format: uuid
+                sprint_uuid:
+                  type: string
+                  format: uuid
+                  nullable: true
+                position:
+                  type: integer
+                  minimum: 0
+                  example: 0
+      responses:
+        '200':
+          description: Card movido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CardData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          description: Coluna cheia (WIP) ou dados inválidos
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: A coluna "Em teste" atingiu o limite de 3 cards (WIP).
+                errors:
+                  board_column_uuid:
+                    - A coluna "Em teste" atingiu o limite de 3 cards (WIP).
+
+  # ---------------------------------------------------------------- Comentários
+  /cards/{uuid}/comments:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Comentários]
+      summary: Listar comentários do card
+      responses:
+        '200':
+          description: Comentários, mais recentes primeiro
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Comment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Comentários]
+      summary: Comentar no card
+      description: Notifica (`card_commented`) o responsável e o criador do card, exceto o próprio autor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+                  example: Priorizar para esta sprint.
+      responses:
+        '201':
+          description: Comentário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /comments/{uuid}:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    put:
+      tags: [Comentários]
+      summary: Editar comentário
+      description: Somente o autor ou um administrador.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body:
+                  type: string
+      responses:
+        '200':
+          description: Comentário atualizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentData'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+    delete:
+      tags: [Comentários]
+      summary: Excluir comentário
+      description: Somente o autor ou um administrador.
+      responses:
+        '204':
+          description: Excluído
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  # ---------------------------------------------------------------- Anexos
+  /cards/{uuid}/attachments:
+    parameters:
+      - $ref: '#/components/parameters/Uuid'
+    get:
+      tags: [Anexos]
+      summary: Listar anexos do card
+      responses:
+        '200':
+          description: Anexos, mais recentes primeiro
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Attachment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      tags: [Anexos]
+      summary: Enviar anexo para o card
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Qualquer arquivo até 20 MB
+      responses:
+        '201':
+          description: Anexo criado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Attachment'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+
+  /attachments/{uuid}:
+    delete:
+      tags: [Anexos]
+      summary: Excluir anexo
+      parameters:
+        - $ref: '#/components/parameters/Uuid'
+      responses:
+        '204':
+          description: Excluído (arquivo removido do disco)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token devolvido por `POST /login` ou `POST /refresh`.
+
+  parameters:
+    Uuid:
+      name: uuid
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Identificador público do recurso
+    NotificationId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+      description: Id da notificação
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Página da listagem
+    SprintScope:
+      name: sprint
+      in: query
+      required: false
+      schema:
+        type: string
+        default: all
+      description: 'Recorte de sprint: `all` (todas + backlog), `backlog` (cards sem sprint) ou o uuid de uma sprint'
+      example: all
+
+  responses:
+    Unauthorized:
+      description: Token ausente, inválido ou expirado / usuário inativo
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Sessão inválida ou expirada.
+    Forbidden:
+      description: Usuário sem acesso ao módulo exigido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Acesso negado ao módulo "tasks".
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Card não encontrado!
+    ValidationError:
+      description: Erro de validação
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+    TooManyRequests:
+      description: Limite de requisições excedido
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Too Many Attempts.
+
+  schemas:
+    # ---- primitivos / enums
+    HexColor:
+      type: string
+      pattern: '^#[0-9a-fA-F]{6}$'
+      example: '#4e735b'
+      description: Cor em hexadecimal (#rrggbb)
+    ModuleSlug:
+      type: string
+      enum: [tasks, users, settings]
+    PrioritySlug:
+      type: string
+      enum: [low, medium, high, urgent]
+      description: Slug da prioridade (tabela `priorities`)
+    SprintStatus:
+      type: string
+      enum: [planned, active, completed]
+    NotificationType:
+      type: string
+      enum: [card_assigned, card_commented]
+
+    # ---- envelopes
+    Message:
+      type: object
+      properties:
+        message:
+          type: string
+          example: Operação realizada com sucesso.
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: string
+          example: O campo título é obrigatório!
+        errors:
+          type: object
+          description: Mapa campo → lista de mensagens
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            title:
+              - O título do card é obrigatório!
+    Paginated:
+      type: object
+      description: Envelope padrão de paginação do Laravel
+      properties:
+        data:
+          type: array
+          items: {}
+        links:
+          type: object
+          properties:
+            first:
+              type: string
+              nullable: true
+            last:
+              type: string
+              nullable: true
+            prev:
+              type: string
+              nullable: true
+            next:
+              type: string
+              nullable: true
+        meta:
+          type: object
+          properties:
+            current_page:
+              type: integer
+              example: 1
+            from:
+              type: integer
+              nullable: true
+            last_page:
+              type: integer
+            path:
+              type: string
+            per_page:
+              type: integer
+              example: 15
+            to:
+              type: integer
+              nullable: true
+            total:
+              type: integer
+    TokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT
+          example: eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...
+        token_type:
+          type: string
+          example: Bearer
+        expires_in:
+          type: integer
+          description: Validade do token em segundos
+          example: 3600
+        user:
+          $ref: '#/components/schemas/User'
+
+    # ---- entidades
+    Module:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Tarefas (Kanban)
+        slug:
+          $ref: '#/components/schemas/ModuleSlug'
+        description:
+          type: string
+          nullable: true
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Administrador
+        email:
+          type: string
+          format: email
+          example: admin@flowtree.test
+        position:
+          type: string
+          nullable: true
+          description: Cargo
+          example: Gestor
+        avatar_url:
+          type: string
+          nullable: true
+          description: URL pública da foto de perfil
+        is_admin:
+          type: boolean
+        is_active:
+          type: boolean
+        modules:
+          type: array
+          description: Presente em `/me`, `/users` e nas respostas de usuário
+          items:
+            $ref: '#/components/schemas/Module'
+        created_at:
+          type: string
+          format: date-time
+    UserData:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/User'
+    UserCreateInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Maria Dev
+        email:
+          type: string
+          format: email
+          example: maria@flowtree.test
+        password:
+          type: string
+          format: password
+          minLength: 8
+          example: password
+        position:
+          type: string
+          nullable: true
+          example: Desenvolvedora
+        is_admin:
+          type: boolean
+          default: false
+        is_active:
+          type: boolean
+          default: true
+        module_slugs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModuleSlug'
+          example: [tasks]
+    UserUpdateInput:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+          minLength: 8
+          description: Só altera se enviada
+        position:
+          type: string
+          nullable: true
+        is_admin:
+          type: boolean
+        is_active:
+          type: boolean
+        module_slugs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ModuleSlug'
+
+    Priority:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        slug:
+          $ref: '#/components/schemas/PrioritySlug'
+        name:
+          type: string
+          example: Média
+        color:
+          $ref: '#/components/schemas/HexColor'
+        position:
+          type: integer
+          example: 1
+
+    Flag:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Bug
+        slug:
+          type: string
+          example: bug
+        color:
+          $ref: '#/components/schemas/HexColor'
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: FlowTree Demo
+        description:
+          type: string
+          nullable: true
+        color:
+          $ref: '#/components/schemas/HexColor'
+        logo_url:
+          type: string
+          nullable: true
+        is_archived:
+          type: boolean
+        owner:
+          $ref: '#/components/schemas/User'
+        members:
+          type: array
+          description: Presente no detalhe
+          items:
+            $ref: '#/components/schemas/User'
+        columns:
+          type: array
+          description: Presente no detalhe e no board (no board, cada coluna traz `cards`)
+          items:
+            $ref: '#/components/schemas/BoardColumn'
+        sprints:
+          type: array
+          description: Presente no detalhe
+          items:
+            $ref: '#/components/schemas/Sprint'
+        active_sprint:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/Sprint'
+        cards_count:
+          type: integer
+          example: 12
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectData:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Project'
+
+    BoardColumn:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        project_id:
+          type: integer
+        name:
+          type: string
+          example: Em front-end
+        color:
+          $ref: '#/components/schemas/HexColor'
+        position:
+          type: integer
+          example: 2
+        wip_limit:
+          type: integer
+          nullable: true
+          example: 5
+        is_done:
+          type: boolean
+          description: Coluna que conta como "Concluído"
+        cards:
+          type: array
+          description: Presente no board
+          items:
+            $ref: '#/components/schemas/Card'
+        cards_count:
+          type: integer
+    BoardColumnData:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/BoardColumn'
+
+    Sprint:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        project_id:
+          type: integer
+        name:
+          type: string
+          example: Sprint 1
+        goal:
+          type: string
+          nullable: true
+          example: Entregar o fluxo de login.
+        starts_at:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-01'
+        ends_at:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-12'
+        status:
+          $ref: '#/components/schemas/SprintStatus'
+        position:
+          type: integer
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        cards_count:
+          type: integer
+          example: 8
+        done_count:
+          type: integer
+          description: Cards em coluna `is_done`
+          example: 3
+    SprintData:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Sprint'
+    SprintInput:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 255
+          example: Sprint 1
+        goal:
+          type: string
+          nullable: true
+          maxLength: 2000
+        starts_at:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-01'
+        ends_at:
+          type: string
+          format: date
+          nullable: true
+          description: Deve ser igual ou posterior a `starts_at`
+          example: '2026-09-12'
+
+    ColumnRef:
+      type: object
+      description: Referência resumida de coluna
+      properties:
+        uuid:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: Em teste
+        color:
+          $ref: '#/components/schemas/HexColor'
+
+    CardMovement:
+      type: object
+      description: Movimento de coluna do card (histórico)
+      properties:
+        id:
+          type: integer
+        from_column:
+          type: object
+          nullable: true
+          description: '`null` na criação do card'
+          allOf:
+            - $ref: '#/components/schemas/ColumnRef'
+        to_column:
+          $ref: '#/components/schemas/ColumnRef'
+        user:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        created_at:
+          type: string
+          format: date-time
+
+    Card:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        project_id:
+          type: integer
+        board_column_id:
+          type: integer
+        board_column_uuid:
+          type: string
+          format: uuid
+        sprint_id:
+          type: integer
+          nullable: true
+          description: '`null` = Backlog'
+        sprint_uuid:
+          type: string
+          format: uuid
+          nullable: true
+        title:
+          type: string
+          example: Revisar documento do projeto
+        description:
+          type: string
+          nullable: true
+        priority:
+          $ref: '#/components/schemas/PrioritySlug'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-18'
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        position:
+          type: integer
+          description: Posição dentro da célula (coluna × sprint)
+        is_overdue:
+          type: boolean
+          description: '`due_date` no passado e sem `completed_at`'
+        assignee:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        creator:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        flags:
+          type: array
+          items:
+            $ref: '#/components/schemas/Flag'
+        comments:
+          type: array
+          description: Presente no detalhe
+          items:
+            $ref: '#/components/schemas/Comment'
+        attachments:
+          type: array
+          description: Presente no detalhe
+          items:
+            $ref: '#/components/schemas/Attachment'
+        movements:
+          type: array
+          description: Presente no detalhe
+          items:
+            $ref: '#/components/schemas/CardMovement'
+        comments_count:
+          type: integer
+        attachments_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CardData:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Card'
+    CardCreateInput:
+      type: object
+      required: [title, board_column_uuid]
+      properties:
+        title:
+          type: string
+          maxLength: 255
+          example: Revisar documento do projeto
+        description:
+          type: string
+          nullable: true
+        board_column_uuid:
+          type: string
+          format: uuid
+        sprint_uuid:
+          type: string
+          format: uuid
+          nullable: true
+          description: Omitido/null = Backlog
+        assignee_uuid:
+          type: string
+          format: uuid
+          nullable: true
+        priority:
+          $ref: '#/components/schemas/PrioritySlug'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+          example: '2026-09-18'
+        flag_uuids:
+          type: array
+          items:
+            type: string
+            format: uuid
+    CardUpdateInput:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 255
+        description:
+          type: string
+          nullable: true
+        board_column_uuid:
+          type: string
+          format: uuid
+        sprint_uuid:
+          type: string
+          format: uuid
+          nullable: true
+          description: '`null` = Backlog'
+        assignee_uuid:
+          type: string
+          format: uuid
+          nullable: true
+          description: '`null` remove o responsável'
+        priority:
+          $ref: '#/components/schemas/PrioritySlug'
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        flag_uuids:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    Comment:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        card_id:
+          type: integer
+        body:
+          type: string
+          example: Priorizar para esta sprint.
+        user:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    CommentData:
+      type: object
+      properties:
+        data:
+          $ref: '#/components/schemas/Comment'
+
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: integer
+        uuid:
+          type: string
+          format: uuid
+        card_id:
+          type: integer
+        comment_id:
+          type: integer
+          nullable: true
+        filename:
+          type: string
+          example: briefing.pdf
+        mime_type:
+          type: string
+          example: application/pdf
+        size:
+          type: integer
+          description: Tamanho em bytes
+          example: 182044
+        url:
+          type: string
+          nullable: true
+          description: URL pública do arquivo
+        user:
+          type: object
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/User'
+        created_at:
+          type: string
+          format: date-time
+
+    Notification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/NotificationType'
+        data:
+          type: object
+          properties:
+            card_uuid:
+              type: string
+              format: uuid
+            card_title:
+              type: string
+            project_uuid:
+              type: string
+              format: uuid
+            project_name:
+              type: string
+            actor_uuid:
+              type: string
+              format: uuid
+            actor_name:
+              type: string
+            comment_excerpt:
+              type: string
+              description: Apenas em `card_commented`
+        read:
+          type: boolean
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
+    Metrics:
+      type: object
+      properties:
+        scope:
+          type: object
+          properties:
+            sprint:
+              type: string
+              description: '`all`, `backlog` ou uuid da sprint'
+              example: all
+        cards_total:
+          type: integer
+          example: 12
+        cards_done:
+          type: integer
+          example: 5
+        cards_open:
+          type: integer
+          example: 7
+        cards_overdue:
+          type: integer
+          example: 1
+        throughput:
+          type: integer
+          description: Cards concluídos no escopo
+          example: 5
+        avg_cycle_time_days:
+          type: number
+          format: float
+          description: Média de `completed_at - started_at` em dias (1 casa decimal)
+          example: 3.4
+        avg_lead_time_days:
+          type: number
+          format: float
+          description: Média de `completed_at - created_at` em dias (1 casa decimal)
+          example: 6.1
+        by_column:
+          type: array
+          items:
+            type: object
+            properties:
+              uuid:
+                type: string
+                format: uuid
+              name:
+                type: string
+              color:
+                $ref: '#/components/schemas/HexColor'
+              count:
+                type: integer
+              is_done:
+                type: boolean
+        by_priority:
+          type: array
+          items:
+            type: object
+            properties:
+              slug:
+                $ref: '#/components/schemas/PrioritySlug'
+              name:
+                type: string
+              color:
+                $ref: '#/components/schemas/HexColor'
+              count:
+                type: integer
+        by_assignee:
+          type: array
+          items:
+            type: object
+            properties:
+              user:
+                type: object
+                nullable: true
+                allOf:
+                  - $ref: '#/components/schemas/User'
+              count:
+                type: integer
+              done:
+                type: integer
+        completed_by_day:
+          type: array
+          description: Últimos 30 dias; dias sem card vêm com 0
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+                example: '2026-09-03'
+              count:
+                type: integer
+                example: 2

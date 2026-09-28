@@ -1,0 +1,65 @@
+# FlowTree — Colunas do board — módulo `tasks`
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@projectUuid = COLE_O_UUID_DO_PROJETO
+@columnUuid = COLE_O_UUID_DA_COLUNA
+
+### Listar colunas (com cards_count)
+GET {{host}}/projects/{{projectUuid}}/columns
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Criar coluna (entra no fim)
+POST {{host}}/projects/{{projectUuid}}/columns
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Em revisão",
+  "color": "#4a6d63",
+  "wip_limit": 3,
+  "is_done": false
+}
+
+### Atualizar coluna (nome, cor, WIP, is_done)
+PUT {{host}}/columns/{{columnUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Em revisão de código",
+  "color": "#5c7b5d",
+  "wip_limit": 5
+}
+
+### Remover o limite de WIP
+PUT {{host}}/columns/{{columnUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "wip_limit": null
+}
+
+### Reordenar colunas (posições 0..n na ordem enviada)
+PATCH {{host}}/projects/{{projectUuid}}/columns/reorder
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "column_uuids": [
+    "UUID_COLUNA_1",
+    "UUID_COLUNA_2",
+    "UUID_COLUNA_3"
+  ]
+}
+
+### Excluir coluna (exclui os cards junto; última coluna → 422)
+DELETE {{host}}/columns/{{columnUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}

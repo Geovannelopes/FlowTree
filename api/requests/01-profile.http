@@ -1,0 +1,55 @@
+# FlowTree — Perfil do usuário autenticado
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+
+### Meus dados
+GET {{host}}/me
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Atualizar nome e cargo
+PUT {{host}}/me
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Administrador",
+  "position": "Gestor de projetos"
+}
+
+### Alterar a própria senha
+PUT {{host}}/me/password
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "current_password": "password",
+  "password": "novaSenha123",
+  "password_confirmation": "novaSenha123"
+}
+
+### Enviar foto de perfil (jpg/png/webp, máx. 5 MB)
+POST {{host}}/me/avatar
+Accept: application/json
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----FlowTreeBoundary
+
+------FlowTreeBoundary
+Content-Disposition: form-data; name="avatar"; filename="avatar.png"
+Content-Type: image/png
+
+< ./avatar.png
+------FlowTreeBoundary--
+
+### Remover foto de perfil
+DELETE {{host}}/me/avatar
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Módulos do sistema
+GET {{host}}/modules
+Accept: application/json
+Authorization: Bearer {{token}}

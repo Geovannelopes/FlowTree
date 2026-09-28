@@ -1,0 +1,68 @@
+# FlowTree — Usuários (módulo `users`; admin passa)
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@userUuid = COLE_O_UUID_DO_USUARIO
+
+### Listar usuários (paginado)
+GET {{host}}/users?page=1
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Buscar por nome/e-mail
+GET {{host}}/users?search=dev
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Criar usuário (com módulos)
+POST {{host}}/users
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Maria Dev",
+  "email": "maria@flowtree.test",
+  "password": "password",
+  "position": "Desenvolvedora",
+  "is_admin": false,
+  "is_active": true,
+  "module_slugs": ["tasks"]
+}
+
+### Detalhar usuário
+GET {{host}}/users/{{userUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Atualizar usuário (campos opcionais; password só se enviada)
+PUT {{host}}/users/{{userUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Maria Dev Sênior",
+  "position": "Tech lead",
+  "is_active": true
+}
+
+### Sincronizar módulos do usuário
+PUT {{host}}/users/{{userUuid}}/modules
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "module_slugs": ["tasks", "settings"]
+}
+
+### Excluir usuário (não pode ser o próprio → 422)
+DELETE {{host}}/users/{{userUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Usuários atribuíveis a cards (módulo tasks — lista enxuta)
+GET {{host}}/assignable-users
+Accept: application/json
+Authorization: Bearer {{token}}

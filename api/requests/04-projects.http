@@ -1,0 +1,99 @@
+# FlowTree — Projetos (boards) — módulo `tasks`
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@projectUuid = COLE_O_UUID_DO_PROJETO
+@memberUuid = COLE_O_UUID_DE_UM_USUARIO
+
+### Listar projetos ativos
+GET {{host}}/projects
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Listar projetos arquivados
+GET {{host}}/projects?archived=1
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Buscar projeto pelo nome
+GET {{host}}/projects?search=demo
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Criar projeto (gera as colunas padrão do FlowTree)
+POST {{host}}/projects
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "App Mobile",
+  "description": "Aplicativo iOS/Android.",
+  "color": "#4d6f6c",
+  "member_uuids": ["{{memberUuid}}"]
+}
+
+### Detalhar projeto (owner, members, columns, sprints)
+GET {{host}}/projects/{{projectUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Atualizar projeto
+PUT {{host}}/projects/{{projectUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "App Mobile v2",
+  "description": "Aplicativo iOS/Android — segunda fase.",
+  "color": "#7c8060"
+}
+
+### Arquivar projeto
+PUT {{host}}/projects/{{projectUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "is_archived": true
+}
+
+### Board completo (todas as sprints + backlog)
+GET {{host}}/projects/{{projectUuid}}/board?sprint=all
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Board — só o Backlog
+GET {{host}}/projects/{{projectUuid}}/board?sprint=backlog
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Board — uma sprint específica
+GET {{host}}/projects/{{projectUuid}}/board?sprint=COLE_O_UUID_DA_SPRINT
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Enviar logo (jpg/png/webp/svg, máx. 5 MB)
+POST {{host}}/projects/{{projectUuid}}/logo
+Accept: application/json
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=----FlowTreeBoundary
+
+------FlowTreeBoundary
+Content-Disposition: form-data; name="logo"; filename="logo.png"
+Content-Type: image/png
+
+< ./logo.png
+------FlowTreeBoundary--
+
+### Remover logo
+DELETE {{host}}/projects/{{projectUuid}}/logo
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Excluir projeto
+DELETE {{host}}/projects/{{projectUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}

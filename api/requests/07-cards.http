@@ -1,0 +1,131 @@
+# FlowTree — Cards — módulo `tasks`
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@projectUuid = COLE_O_UUID_DO_PROJETO
+@cardUuid = COLE_O_UUID_DO_CARD
+@columnUuid = COLE_O_UUID_DA_COLUNA
+@sprintUuid = COLE_O_UUID_DA_SPRINT
+@assigneeUuid = COLE_O_UUID_DO_RESPONSAVEL
+@flagUuid = COLE_O_UUID_DA_FLAG
+
+### Listar cards do projeto
+GET {{host}}/projects/{{projectUuid}}/cards
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Listar cards com filtros (coluna, sprint, responsável, prioridade, flag, busca)
+GET {{host}}/projects/{{projectUuid}}/cards?column={{columnUuid}}&sprint=backlog&assignee={{assigneeUuid}}&priority=high&flag={{flagUuid}}&search=login
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Criar card no Backlog
+POST {{host}}/projects/{{projectUuid}}/cards
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Revisar documento do projeto",
+  "description": "Conferir o escopo e os prazos com o cliente.",
+  "board_column_uuid": "{{columnUuid}}",
+  "priority": "medium",
+  "due_date": "2026-09-18"
+}
+
+### Criar card completo (sprint, responsável, flags)
+POST {{host}}/projects/{{projectUuid}}/cards
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Corrigir login no mobile",
+  "description": "Botão de login não responde em telas pequenas.",
+  "board_column_uuid": "{{columnUuid}}",
+  "sprint_uuid": "{{sprintUuid}}",
+  "assignee_uuid": "{{assigneeUuid}}",
+  "priority": "urgent",
+  "due_date": "2026-09-10",
+  "flag_uuids": ["{{flagUuid}}"]
+}
+
+### Detalhar card (comentários, anexos, movimentos)
+GET {{host}}/cards/{{cardUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Atualizar card (campos opcionais)
+PUT {{host}}/cards/{{cardUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "title": "Corrigir login no mobile (iOS)",
+  "priority": "high",
+  "due_date": "2026-09-12",
+  "assignee_uuid": "{{assigneeUuid}}",
+  "flag_uuids": ["{{flagUuid}}"]
+}
+
+### Trocar só a prioridade (popover do card)
+PUT {{host}}/cards/{{cardUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "priority": "low"
+}
+
+### Mandar o card para o Backlog e tirar o responsável
+PUT {{host}}/cards/{{cardUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "sprint_uuid": null,
+  "assignee_uuid": null
+}
+
+### Mover card (mesma sprint, outra coluna, topo)
+PATCH {{host}}/cards/{{cardUuid}}/move
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "board_column_uuid": "{{columnUuid}}",
+  "position": 0
+}
+
+### Mover card para outra sprint (raia) e coluna
+PATCH {{host}}/cards/{{cardUuid}}/move
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "board_column_uuid": "{{columnUuid}}",
+  "sprint_uuid": "{{sprintUuid}}",
+  "position": 1
+}
+
+### Mover card para o Backlog
+PATCH {{host}}/cards/{{cardUuid}}/move
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "board_column_uuid": "{{columnUuid}}",
+  "sprint_uuid": null,
+  "position": 0
+}
+
+### Excluir card
+DELETE {{host}}/cards/{{cardUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}

@@ -1,0 +1,72 @@
+# FlowTree — Auth
+# Extensão REST Client (VS Code). Faça o login abaixo e cole o `token` da resposta em @token.
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+
+### Login (admin semeado)
+POST {{host}}/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "admin@flowtree.test",
+  "password": "password"
+}
+
+### Login (usuário comum — módulo tasks)
+POST {{host}}/login
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "dev@flowtree.test",
+  "password": "password"
+}
+
+### Usuário autenticado (com módulos)
+GET {{host}}/me
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Renovar o token (aceita token expirado dentro dos 14 dias)
+POST {{host}}/refresh
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Esqueci a senha (resposta sempre genérica)
+POST {{host}}/forgot-password
+Content-Type: application/json
+Accept: application/json
+
+{
+  "email": "admin@flowtree.test"
+}
+
+### Redefinir a senha (token vem do e-mail — em dev, no storage/logs/laravel.log)
+POST {{host}}/reset-password
+Content-Type: application/json
+Accept: application/json
+
+{
+  "token": "TOKEN_DO_EMAIL",
+  "email": "admin@flowtree.test",
+  "password": "novaSenha123",
+  "password_confirmation": "novaSenha123"
+}
+
+### Autorizar canal do Reverb (o Echo faz isso sozinho)
+POST {{host}}/broadcasting/auth
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "socket_id": "123456.789012",
+  "channel_name": "private-project.COLE_O_UUID_DO_PROJETO"
+}
+
+### Logout (blacklist do token)
+POST {{host}}/logout
+Accept: application/json
+Authorization: Bearer {{token}}

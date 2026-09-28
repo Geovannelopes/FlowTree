@@ -1,0 +1,137 @@
+name: flowtree
+
+# FlowTree — Kanban com sprints e tempo real.
+# URL única → http://localhost:9050
+#   O nginx do `app` serve a SPA e faz proxy de /api, /docs, /storage e /app (WebSocket)
+#   para o `api`: front e backend na mesma origem, sem CORS. É esta a porta para
+#   apontar o proxy/domínio externo.
+#
+#   api   → http://localhost:5100  (acesso direto à API, aberto; mesma app do /api acima)
+#   mysql & redis → sem porta publicada; acessíveis só pela rede interna "backend" (api).
+#
+# Atrás de um proxy externo com domínio próprio, defina no .env da raiz:
+#   APP_URL=https://app.flowtree.develop.ictech.dev        → proxy para a porta 9050
+#   REVERB_PUBLIC_HOST=reverb.flowtree.develop.ictech.dev  → proxy para a porta 6100
+# Sem REVERB_PUBLIC_HOST o WebSocket sai pela mesma origem do front (/app).
+#
+# As credenciais do Reverb ficam no .env da RAIZ (copie de .env.example): o mesmo
+# valor vai para o api (variável de ambiente, que vence o api/.env) e para o build
+# do app (VITE_REVERB_APP_KEY embutido no bundle).
+
+services:
+  api:
+    build: ./api
+    container_name: flowtree-api
+    image: flowtree-api
+    ports:
+      # API aberta também em porta própria; pela URL única ela responde em 9050/api.
+      - "5100:80"
+      # Reverb. Publicado para o proxy externo alcançar o domínio reverb.*; sem
+      # proxy próprio, o front usa /app na porta 9050 e esta porta é só depuração.
+      - "${REVERB_BIND:-127.0.0.1:}6100:6100"
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_DATABASE: ${MYSQL_DATABASE:-flowtree}
+      DB_USERNAME: ${MYSQL_USER:-flowtree}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-flowtree}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REVERB_APP_ID: ${REVERB_APP_ID}
+      REVERB_APP_KEY: ${REVERB_APP_KEY}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET}
+      # URL pública por onde o navegador chega (links de e-mail, redirects, assets).
+      APP_URL: ${APP_URL:-http://localhost:9050}
+      FRONTEND_URL: ${APP_URL:-http://localhost:9050}
+    volumes:
+      # Código montado do host (inclui vendor): editar reflete na hora.
+      - ./api:/var/www/html
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [frontend, backend]
+    restart: always
+
+  app:
+    build:
+      context: ./app
+      args:
+        VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+        VITE_DEMO_LOGIN: ${DEMO_LOGIN:-1}
+        # Vazio = WebSocket na mesma origem (proxy /app). Preenchido = domínio próprio.
+        VITE_REVERB_HOST: ${REVERB_PUBLIC_HOST:-}
+        VITE_REVERB_PORT: ${REVERB_PUBLIC_PORT:-}
+        VITE_REVERB_SCHEME: ${REVERB_PUBLIC_SCHEME:-}
+    container_name: flowtree-app
+    image: flowtree-app
+    ports:
+      - "9050:80"
+    depends_on:
+      - api
+    networks: [frontend]
+    restart: always
+
+  # Dev com HMR (opcional): `docker compose --profile dev up app-dev` → http://localhost:5173
+  app-dev:
+    image: node:22-alpine
+    container_name: flowtree-app-dev
+    profiles: ["dev"]
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      VITE_API_PROXY_TARGET: http://api:80
+      VITE_REVERB_APP_KEY: ${REVERB_APP_KEY}
+    volumes:
+      - ./app:/app
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
+    networks: [frontend]
+
+  mysql:
+    image: mysql:8.0
+    container_name: flowtree-mysql
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-flowtree}
+      MYSQL_USER: ${MYSQL_USER:-flowtree}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-flowtree}
+      TZ: America/Sao_Paulo
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: flowtree-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: always
+
+networks:
+  # backend é internal: sem rota para fora e sem portas publicadas — só quem está
+  # nela (api, mysql, redis) alcança o banco e o cache.
+  backend:
+    internal: true
+  frontend:
+
+volumes:
+  mysql-data:
+  redis-data:

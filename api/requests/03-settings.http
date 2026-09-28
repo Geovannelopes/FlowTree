@@ -1,0 +1,75 @@
+# FlowTree — Configurações: flags, prioridades e reset do banco
+# Leitura: módulo `tasks`. Escrita: módulo `settings` (admin passa).
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@flagUuid = COLE_O_UUID_DA_FLAG
+@priorityUuid = COLE_O_UUID_DA_PRIORIDADE
+
+### Listar flags
+GET {{host}}/flags
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Criar flag (slug gerado do nome)
+POST {{host}}/flags
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Refatoração",
+  "color": "#4c7570"
+}
+
+### Atualizar flag
+PUT {{host}}/flags/{{flagUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Refatoração técnica",
+  "color": "#6f8a63"
+}
+
+### Excluir flag
+DELETE {{host}}/flags/{{flagUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Listar prioridades (low, medium, high, urgent)
+GET {{host}}/priorities
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Atualizar rótulo/cor de uma prioridade (slugs fixos)
+PUT {{host}}/priorities/{{priorityUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Alta",
+  "color": "#4c7570"
+}
+
+### Resetar o banco com dados de demonstração (só admin)
+POST {{host}}/maintenance/reset
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "mode": "demo"
+}
+
+### Resetar o banco deixando apenas o administrador logado
+POST {{host}}/maintenance/reset
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "mode": "clean"
+}

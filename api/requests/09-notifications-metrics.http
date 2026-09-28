@@ -1,0 +1,47 @@
+# FlowTree — Notificações e métricas
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@projectUuid = COLE_O_UUID_DO_PROJETO
+@sprintUuid = COLE_O_UUID_DA_SPRINT
+@notificationId = COLE_O_ID_DA_NOTIFICACAO
+
+### Listar notificações (paginado)
+GET {{host}}/notifications?page=1
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Quantidade de não lidas (sininho)
+GET {{host}}/notifications/unread-count
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Marcar uma como lida
+POST {{host}}/notifications/{{notificationId}}/read
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Marcar todas como lidas
+POST {{host}}/notifications/read-all
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Excluir notificação
+DELETE {{host}}/notifications/{{notificationId}}
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Métricas do projeto — todas as sprints + backlog
+GET {{host}}/projects/{{projectUuid}}/metrics?sprint=all
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Métricas — só o Backlog
+GET {{host}}/projects/{{projectUuid}}/metrics?sprint=backlog
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Métricas — uma sprint específica
+GET {{host}}/projects/{{projectUuid}}/metrics?sprint={{sprintUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}

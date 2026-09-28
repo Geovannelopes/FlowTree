@@ -1,0 +1,104 @@
+# FlowTree — Sprints — módulo `tasks`
+
+@host = http://localhost:5100/api
+@token = COLE_O_TOKEN_AQUI
+@projectUuid = COLE_O_UUID_DO_PROJETO
+@sprintUuid = COLE_O_UUID_DA_SPRINT
+
+### Listar sprints (cards_count, done_count)
+GET {{host}}/projects/{{projectUuid}}/sprints
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Criar sprint (nasce como planned)
+POST {{host}}/projects/{{projectUuid}}/sprints
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Sprint 3",
+  "goal": "Fechar o módulo de relatórios.",
+  "starts_at": "2026-09-15",
+  "ends_at": "2026-09-26"
+}
+
+### Atualizar sprint
+PUT {{host}}/sprints/{{sprintUuid}}
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "name": "Sprint 3 — Relatórios",
+  "goal": "Fechar o módulo de relatórios e o export.",
+  "ends_at": "2026-09-30"
+}
+
+### Ativar sprint (só uma ativa por projeto)
+POST {{host}}/sprints/{{sprintUuid}}/activate
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Concluir sprint — cards abertos voltam ao Backlog
+POST {{host}}/sprints/{{sprintUuid}}/complete
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "move_open_to": "backlog"
+}
+
+### Concluir sprint — cards abertos vão para outra sprint
+POST {{host}}/sprints/{{sprintUuid}}/complete
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "move_open_to": "COLE_O_UUID_DA_PROXIMA_SPRINT"
+}
+
+### Concluir sprint — cards abertos permanecem nela
+POST {{host}}/sprints/{{sprintUuid}}/complete
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "move_open_to": null
+}
+
+### Reabrir sprint concluída (volta para planned)
+POST {{host}}/sprints/{{sprintUuid}}/reopen
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Atribuir todo o Backlog à sprint
+POST {{host}}/sprints/{{sprintUuid}}/assign-backlog
+Accept: application/json
+Authorization: Bearer {{token}}
+
+### Exportar CSV da sprint
+GET {{host}}/sprints/{{sprintUuid}}/export
+Accept: text/csv
+Authorization: Bearer {{token}}
+
+### Reordenar sprints
+PATCH {{host}}/projects/{{projectUuid}}/sprints/reorder
+Content-Type: application/json
+Accept: application/json
+Authorization: Bearer {{token}}
+
+{
+  "sprint_uuids": [
+    "UUID_SPRINT_2",
+    "UUID_SPRINT_1"
+  ]
+}
+
+### Excluir sprint (cards voltam ao Backlog)
+DELETE {{host}}/sprints/{{sprintUuid}}
+Accept: application/json
+Authorization: Bearer {{token}}

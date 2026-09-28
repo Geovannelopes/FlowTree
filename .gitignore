@@ -1,0 +1,7 @@
+.env
+.DS_Store
+*.log
+
+# Envs de ambiente com segredos (o .env.example fica versionado).
+.env.*
+!.env.example

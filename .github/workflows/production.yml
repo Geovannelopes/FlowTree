@@ -1,0 +1,48 @@
+name: "Deploy Production"
+
+on:
+  push:
+    branches:
+      - production
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixando o codigo...
+        uses: actions/checkout@v5
+
+      - name: Instalando rsync...
+        run: sudo apt-get update && sudo apt-get install -y rsync
+
+      - name: Configurando chave SSH...
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PRODUCTION_DEPLOY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p ${{ secrets.PRODUCTION_PORT }} ${{ secrets.PRODUCTION_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Enviando arquivos com rsync...
+        run: |
+          rsync -avz --delete \
+            -e "ssh -p ${{ secrets.PRODUCTION_PORT }}" \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='api/.env' \
+            --exclude='app/.env' \
+            --exclude='vendor/' \
+            --exclude='node_modules/' \
+            --exclude='api/storage/app/' \
+            ./ ${{ secrets.PRODUCTION_USER }}@${{ secrets.PRODUCTION_HOST }}:${{ secrets.PRODUCTION_PATH }}
+
+      - name: Executando deploy...
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_DEPLOY }}
+          port: ${{ secrets.PRODUCTION_PORT }}
+          script: |
+            cd ${{ secrets.PRODUCTION_PATH }}
+            ./deploy.sh
